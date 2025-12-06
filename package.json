@@ -16,6 +16,6 @@
     "torrent-search-api": "^2.1.4",
     "uuid": "^9.0.1",
     "video-name-parser": "^1.0.0",
-    "webtorrent": "^2.0.24"
+    "webtorrent": "^1.9.7"
   }
 }
