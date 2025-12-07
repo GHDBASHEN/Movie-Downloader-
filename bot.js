@@ -17,39 +17,34 @@ const searchCache = new Map(); // Stores search results temporarily
 // 1. Start Command
 bot.start((ctx) => ctx.reply("👋 Welcome! Type a movie name (e.g. 'Inception') to search."));
 
-bot.on('channel_post', async (ctx) => {
-  // 1. Check if this post is from our Storage Channel
-  const channelId = ctx.chat.id.toString();
-  const envChannelId = process.env.STORAGE_CHANNEL_ID.toString();
-  
-  if (channelId !== envChannelId) return;
+// 2. Search Handler (User types text)
+bot.on('text', async (ctx) => {
+  const query = ctx.message.text;
+  if (query.startsWith('/')) return; // Ignore commands
 
-  // 2. Get the file details
-  const video = ctx.channelPost.video || ctx.channelPost.document;
-  if (!video) return;
-
-  const realFileId = video.file_id;
-  
-  // The worker puts the Movie Title in the caption usually. 
-  // We can also find the "PENDING" record by sorting by latest created.
-  
-  try {
-    // Find the most recent movie with "PENDING" status
-    const pendingMovie = await Movie.findOne({ file_id: "PENDING_BOT_MUST_READ_CHANNEL" }).sort({ created_at: -1 });
-
-    if (pendingMovie) {
-        console.log(`🔄 Updating DB for: ${pendingMovie.title}`);
-        
-        pendingMovie.file_id = realFileId;
-        pendingMovie.message_id = ctx.channelPost.message_id;
-        pendingMovie.quality = "HD (Auto)"; // Update quality if needed
-        
-        await pendingMovie.save();
-        console.log(`✅ FIXED: "${pendingMovie.title}" is now ready for users!`);
-    }
-  } catch (err) {
-    console.error("Indexer Error:", err);
+  // A. Check Database first (Instant Delivery)
+  const cachedMovie = await Movie.findOne({ title: { $regex: query, $options: 'i' } });
+  if (cachedMovie) {
+    return ctx.replyWithDocument(cachedMovie.file_id, {
+      caption: `🚀 <b>Instant Delivery from Cache!</b>\n\n🎬 ${cachedMovie.title}\n📊 Rating: ${cachedMovie.imdb_rating}`,
+      parse_mode: 'HTML'
+    });
   }
+
+  // B. If not in DB, Search Torrents
+  await ctx.reply(`🔎 Searching the web for "${query}"...`);
+  const results = await searchMovies(query);
+
+  if (results.length === 0) return ctx.reply("❌ No movies found.");
+
+  // Create Buttons
+  const buttons = results.map((t) => {
+    const id = uuidv4().split('-')[0];
+    searchCache.set(id, t); // Save to memory
+    return [Markup.button.callback(`📥 ${t.size} | ${t.source} | S:${t.seeds}`, `dl_${id}`)];
+  });
+
+  ctx.reply(`Found ${results.length} results. Choose quality:`, Markup.inlineKeyboard(buttons));
 });
 
 // 3. Download Handler (User clicks button)
