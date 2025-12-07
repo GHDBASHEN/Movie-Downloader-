@@ -10,7 +10,7 @@ const stringSession = new StringSession("");
 (async () => {
   console.log("🔄 Logging in to generate session string...");
   
-  const client = new TelegramClient(stringSession, apiId, apiHash, { connectionRetries: 5 });
+  const client = new TelegramClient(stringSession, apiId, apiHash, { connectionRetries: 5, useWSS: true });
   
   await client.start({
     phoneNumber: async () => await input.text("Enter your phone number (with country code): "),
