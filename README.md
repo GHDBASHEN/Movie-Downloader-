@@ -2,6 +2,8 @@
 
 A powerful Telegram bot that searches for movies via torrents, downloads them to a server, and uploads them directly to a Telegram Channel. It caches files in a MongoDB database, so future searches for the same movie are delivered instantly without re-downloading.
 
+<img width="948" height="1250" alt="image" src="https://github.com/user-attachments/assets/25cbb6d4-50d4-4341-9684-1407a8d36e9f" />
+
 ## ✨ Features
 
 * **Torrent Search:** Scrapes public torrent providers (ThePirateBay, 1337x, etc.) for movies.
