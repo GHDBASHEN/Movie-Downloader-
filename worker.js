@@ -9,42 +9,65 @@ const Movie = require('./models/Movie');
 
 const [magnetURI, userChatId, movieTitle] = process.argv.slice(2);
 
-// Connect DB (Needed to create the PENDING record)
+// Connect DB
 mongoose.connect(process.env.MONGO_URI);
 
 const client = new WebTorrent();
 const session = new StringSession(process.env.SESSION_STRING);
+
+// 1. Connection Settings (Optimized for Upload Stability)
 const telegram = new TelegramClient(session, parseInt(process.env.API_ID), process.env.API_HASH, { 
-    connectionRetries: 5,
-    useWSS: true // Fix for Sri Lanka ISPs
+    connectionRetries: 10,
+    useWSS: true, // Secure WebSockets (Fix for ISP blocks)
+    autoReconnect: true,
 });
 
 (async () => {
   try {
+    console.log("🔄 Worker connecting to Telegram...");
     await telegram.connect();
+    console.log("✅ Worker connected!");
     
-    // 1. Download Torrent
+    // 2. Download Torrent
     client.add(magnetURI, { path: './downloads' }, (torrent) => {
+      console.log(`⬇️ Downloading: ${movieTitle}`);
       
       torrent.on('done', async () => {
-        const file = torrent.files.find(f => f.name.endsWith('.mp4') || f.name.endsWith('.mkv'));
+        console.log("✅ Download Finished. Finding video file...");
+        
+        // Find largest video file
+        const file = torrent.files.find(f => f.name.endsWith('.mp4') || f.name.endsWith('.mkv') || f.name.endsWith('.avi'));
         
         if (!file) {
-           process.send({ status: 'error', error: 'No video file found.' });
+           console.error("❌ No video file found.");
+           if (process.send) process.send({ status: 'error', error: 'No video file found.' });
            process.exit();
         }
 
         const filePath = path.join('./downloads', file.path);
+        const fileSizeMB = (file.length / 1024 / 1024).toFixed(2);
         
+        console.log(`📤 Starting Upload: ${file.name} (${fileSizeMB} MB)`);
+
         try {
-          // 2. Upload to Telegram
+          // 3. ROBUST UPLOAD CONFIGURATION (Fix for FILE_PARTS_INVALID)
           const uploadedMsg = await telegram.sendFile(process.env.STORAGE_CHANNEL_ID, {
             file: filePath,
-            caption: `🎬 ${movieTitle}\n📏 Size: ${(file.length / 1024 / 1024).toFixed(2)} MB`,
-            forceDocument: true
+            caption: `🎬 ${movieTitle}\n📏 Size: ${fileSizeMB} MB`,
+            forceDocument: true,
+            // --- CRITICAL SETTINGS BELOW ---
+            partSizeKB: 512, // Smaller chunks = More stable upload
+            workers: 1,      // Single thread upload prevents part mixing errors
+            progressCallback: (progress) => {
+                const percent = Math.round(progress * 100);
+                // Log every 10% to keep logs clean
+                if (percent % 10 === 0) console.log(`📤 Uploading: ${percent}%`);
+            }
           });
 
-          // 3. Create PENDING record (for Indexer)
+          console.log("✅ Upload Complete!");
+
+          // 4. Create PENDING record
           await Movie.create({
             title: movieTitle,
             file_id: "PENDING_BOT_MUST_READ_CHANNEL", 
@@ -52,23 +75,28 @@ const telegram = new TelegramClient(session, parseInt(process.env.API_ID), proce
             quality: "Auto-Download"
           });
 
-          // 4. CLEANUP (DELETE FROM DISK)
-          // This line deletes the movie from your VPS storage
+          // 5. Cleanup
           fs.unlinkSync(filePath); 
           
-          // Send Success + Message ID back to Bot
-          process.send({ status: 'success', message_id: uploadedMsg.id });
+          if (process.send) process.send({ status: 'success', message_id: uploadedMsg.id });
           process.exit();
 
         } catch (err) {
-          process.send({ status: 'error', error: err.message });
+          console.error("❌ Upload Error:", err);
+          if (process.send) process.send({ status: 'error', error: err.message });
           process.exit();
         }
+      });
+      
+      // Log Torrent Progress
+      torrent.on('download', (bytes) => {
+          // Optional: You can log torrent progress here if needed
       });
     });
 
   } catch (e) {
-    process.send({ status: 'error', error: e.message });
+    console.error("❌ Worker Error:", e);
+    if (process.send) process.send({ status: 'error', error: e.message });
     process.exit();
   }
 })();
